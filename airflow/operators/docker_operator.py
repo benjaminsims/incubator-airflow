@@ -203,6 +203,7 @@ class DockerOperator(BaseOperator):
             commands = ast.literal_eval(self.command)
         else:
             commands = self.command
+        logging.info("Command constructed: %s" % commands)
         return commands
 
     def on_kill(self):
