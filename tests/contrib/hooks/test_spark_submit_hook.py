@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import six
 import sys
 import unittest
-from io import StringIO
 
 from airflow import configuration, models
 from airflow.utils import db
@@ -34,6 +34,9 @@ class TestSparkSubmitHook(unittest.TestCase):
         'files': 'hive-site.xml',
         'py_files': 'sample_library.py',
         'jars': 'parquet.jar',
+        'packages': 'com.databricks:spark-avro_2.11:3.2.0',
+        'exclude_packages': 'org.bad.dependency:1.0.0',
+        'repositories': 'http://myrepo.org',
         'total_executor_cores': 4,
         'executor_cores': 4,
         'executor_memory': '22g',
@@ -45,8 +48,9 @@ class TestSparkSubmitHook(unittest.TestCase):
         'driver_memory': '3g',
         'java_class': 'com.foo.bar.AppMain',
         'application_args': [
-            '-f foo',
-            '--bar bar',
+            '-f', 'foo',
+            '--bar', 'bar',
+            '--with-spaces', 'args should keep embdedded spaces',
             'baz'
         ]
     }
@@ -61,10 +65,6 @@ class TestSparkSubmitHook(unittest.TestCase):
         return return_dict
 
     def setUp(self):
-
-        if sys.version_info[0] == 3:
-            raise unittest.SkipTest('TestSparkSubmitHook won\'t work with '
-                                    'python3. No need to test anything here')
 
         configuration.load_test_config()
         db.merge_conn(
@@ -116,6 +116,9 @@ class TestSparkSubmitHook(unittest.TestCase):
             '--files', 'hive-site.xml',
             '--py-files', 'sample_library.py',
             '--jars', 'parquet.jar',
+            '--packages', 'com.databricks:spark-avro_2.11:3.2.0',
+            '--exclude-packages', 'org.bad.dependency:1.0.0',
+            '--repositories', 'http://myrepo.org',
             '--num-executors', '10',
             '--total-executor-cores', '4',
             '--executor-cores', '4',
@@ -129,24 +132,24 @@ class TestSparkSubmitHook(unittest.TestCase):
             'test_application.py',
             '-f', 'foo',
             '--bar', 'bar',
+            '--with-spaces', 'args should keep embdedded spaces',
             'baz'
         ]
         self.assertEquals(expected_build_cmd, cmd)
 
-    @patch('subprocess.Popen')
+    @patch('airflow.contrib.hooks.spark_submit_hook.subprocess.Popen')
     def test_spark_process_runcmd(self, mock_popen):
         # Given
-        mock_popen.return_value.stdout = StringIO(u'stdout')
-        mock_popen.return_value.stderr = StringIO(u'stderr')
-        mock_popen.return_value.returncode = 0
-        mock_popen.return_value.communicate.return_value = [StringIO(u'stdout\nstdout'), StringIO(u'stderr\nstderr')]
+        mock_popen.return_value.stdout = six.StringIO('stdout')
+        mock_popen.return_value.stderr = six.StringIO('stderr')
+        mock_popen.return_value.wait.return_value = 0
 
         # When
         hook = SparkSubmitHook(conn_id='')
         hook.submit()
 
         # Then
-        self.assertEqual(mock_popen.mock_calls[0], call(['spark-submit', '--master', 'yarn', '--name', 'default-name', ''], stderr=-1, stdout=-1))
+        self.assertEqual(mock_popen.mock_calls[0], call(['spark-submit', '--master', 'yarn', '--name', 'default-name', ''], stderr=-2, stdout=-1, universal_newlines=True, bufsize=-1))
 
     def test_resolve_connection_yarn_default(self):
         # Given
@@ -308,14 +311,13 @@ class TestSparkSubmitHook(unittest.TestCase):
 
         self.assertEqual(hook._yarn_application_id, 'application_1486558679801_1820')
 
-    @patch('subprocess.Popen')
+    @patch('airflow.contrib.hooks.spark_submit_hook.subprocess.Popen')
     def test_spark_process_on_kill(self, mock_popen):
         # Given
-        mock_popen.return_value.stdout = StringIO(u'stdout')
-        mock_popen.return_value.stderr = StringIO(u'stderr')
-        mock_popen.return_value.returncode = 0
+        mock_popen.return_value.stdout = six.StringIO('stdout')
+        mock_popen.return_value.stderr = six.StringIO('stderr')
         mock_popen.return_value.poll.return_value = None
-        mock_popen.return_value.communicate.return_value = [StringIO(u'stderr\nstderr'), StringIO(u'stderr\nstderr')]
+        mock_popen.return_value.wait.return_value = 0
         log_lines = [
             'SPARK_MAJOR_VERSION is set to 2, using Spark2',
             'WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable',
